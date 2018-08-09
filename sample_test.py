@@ -1,6 +1,7 @@
+import pytest
+
 # Function we are testing
 def add(num1, num2):
-    print("Testing...")
     return num1 + num2
 
 # Successful test

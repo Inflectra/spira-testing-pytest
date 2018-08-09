@@ -1,5 +1,4 @@
-PyTest Extension for SpiraTest
-====== ========= === =========
+# PyTest Extension for SpiraTest
 
 This version of the plugin is compatible with Python 3.x
 
