@@ -6,7 +6,7 @@ from setuptools import setup
 import os
 import codecs
 
-
+# Register plugin with pytest
 setup(
     name='pytest-spiratest',
     version='1.0.0',
@@ -35,43 +35,3 @@ setup(
         ],
     },
 )
-
-# Register plugin with pytest
-'''setup(
-    name = "pytest-spiratest",
-    version = "1.0.0",
-    author = "Inflectra Corporation",
-    author_email = "support@inflectra.com",
-    description = "Exports unit tests as test runs in SpiraTest/Team/Plan",
-    packages = ["pytest_spiratest"],
-    package_dir = {"pytest_spiratest": "src"},
-    url = "http://www.inflectra.com/SpiraTest/Integrations/Unit-Test-Frameworks.aspx",
-    install_requires = ["pytest"],
-    # Makes the plugin available to pytest
-    entry_points = {
-        "pytest11": [
-            "pytest-spiratest = pytest_spiratest.spiratest_integration",
-        ],
-    },
-    classifiers = ["Framework :: Pytest"],
-)'''
-
-open("py.txt", "a").write("Setting up!")
-
-'''setup(
-    name="pytest-spiratest",
-    packages = ["pytest_spiratest"],
-    package_dir = {
-        "pytest_spiratest": "pytest_spiratest"
-    },
-    # the following makes a plugin available to pytest
-    entry_points = {
-        'pytest11': [
-            'pytest-spiratest = pytest_spiratest.spiratest_integration',
-        ]
-    },
-    # custom PyPI classifier for pytest plugins
-    classifiers=[
-        "Framework :: Pytest",
-    ],
-)'''
