@@ -8,4 +8,3 @@ can be found at http://www.inflectra.com/Products/Documentation.aspx
 The PDF guide contains details instructions for integrating SpiraTest
 with a variety of automated testing tools including PyTest.
 
-(C) Copyright 2006-2018 Inflectra Corporation

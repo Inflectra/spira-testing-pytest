@@ -1,0 +1,3 @@
+[pytest11]
+pytest-spiratest = pytest_spiratest_integration
+
