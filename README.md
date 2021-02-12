@@ -1,10 +1,5 @@
 # PyTest Extension for SpiraTest
 
-This version of the plugin is compatible with Python 3.x
+This version of the plugin is compatible with Python 3.x and SpiraTest/SpiraTeam/SpiraPlan 6.+
 
-The latest documentation for using this extension
-can be found at http://www.inflectra.com/Products/Documentation.aspx
-
-The PDF guide contains details instructions for integrating SpiraTest
-with a variety of automated testing tools including PyTest.
-
+The latest documentation for using this extension can be found at http://spiradoc.inflectra.com/Unit-Testing-Integration/Integrating-with-PyTest/
