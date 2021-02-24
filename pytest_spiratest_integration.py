@@ -1,5 +1,6 @@
 import requests
 import json
+import datetime
 import time
 import configparser
 
@@ -16,7 +17,7 @@ def pytest_runtest_makereport(item, call, __multicall__):
         # Only do stuff if config is specified
         if config["url"] != "":
             status_id = -1
-            start_time = time.time() - report.duration
+            current_time = datetime.datetime.utcnow()
             # The function name
             test_name = report.location[2]
             stack_trace = report.longreprtext
@@ -42,8 +43,18 @@ def pytest_runtest_makereport(item, call, __multicall__):
                 test_case_id = config["test_case_ids"]["default"]
 
             # Create the test run
-            test_run = SpiraTestRun(config["project_id"], test_case_id, test_name, stack_trace, status_id, start_time,
-                                    message=message, release_id=config["release_id"], test_set_id=config["test_set_id"])
+            test_run = SpiraTestRun(
+                config["project_id"], 
+                test_case_id, 
+                test_name, 
+                stack_trace, 
+                status_id, 
+                current_time - datetime.timedelta(seconds=report.duration), 
+                current_time,
+                message=message, 
+                release_id=config["release_id"], 
+                test_set_id=config["test_set_id"]
+            )
             # Post the test run!
             test_run.post(config["url"], config["username"], config["token"])
 
@@ -84,22 +95,13 @@ def getConfig():
     return config
 
 
-def format_date(seconds):
-    ''' 
-    Returns an Inflectra formatted date based on the seconds passed in (obtained by time.time())
-    '''
-    millis = int(round(seconds * 1000))
-    offset = time.timezone / 3600
-    return '/Date(' + str(millis) + '-0' + str(offset) + '00)/'
-
-
 # Name of this extension
 RUNNER_NAME = "PyTest"
 
 
 class SpiraTestRun:
     # The URL snippet used after the Spira URL
-    REST_SERVICE_URL = "/Services/v5_0/RestService.svc/"
+    REST_SERVICE_URL = "/Services/v6_0/RestService.svc/"
     # The URL spippet used to post an automated test run. Needs the project ID to work
     POST_TEST_RUN = "projects/%s/test-runs/record"
     '''
@@ -111,17 +113,19 @@ class SpiraTestRun:
     stack_trace = ""
     status_id = -1
     start_time = -1
+    end_time = -1
     message = ""
     release_id = -1
     test_set_id = -1
 
-    def __init__(self, project_id, test_case_id, test_name, stack_trace, status_id, start_time, message='', release_id=-1, test_set_id=-1):
+    def __init__(self, project_id, test_case_id, test_name, stack_trace, status_id, start_time, end_time, message='', release_id=-1, test_set_id=-1):
         self.project_id = project_id
         self.test_case_id = test_case_id
         self.test_name = test_name
         self.stack_trace = stack_trace
         self.status_id = status_id
         self.start_time = start_time
+        self.end_time = end_time
         self.message = message
         self.release_id = release_id
         self.test_set_id = test_set_id
@@ -149,7 +153,8 @@ class SpiraTestRun:
         body = {
             # Constant for plain text
             'TestRunFormatId': 1,
-            'StartDate': format_date(self.start_time),
+            'StartDate': self.start_time.isoformat(),
+            'EndDate': self.end_time.isoformat(),
             'RunnerName': RUNNER_NAME,
             'RunnerTestName': self.test_name,
             'RunnerMessage': self.message,
