@@ -38,7 +38,7 @@ def pytest_runtest_makereport(item, call, __multicall__):
 
             # Get the test case id if specified, otherwise use the default
             if test_name in config["test_case_ids"]:
-                test_case_id = config["test_case_ids"][test_name]
+                test_case_id = config["test_case_ids"][test_name.lower()]
             else:
                 test_case_id = config["test_case_ids"]["default"]
 
@@ -91,7 +91,7 @@ def getConfig():
                     config[key] = value
             elif section == "test_cases":
                 for (key, value) in parser.items(section):
-                    config["test_case_ids"][key] = value
+                    config["test_case_ids"][key.lower()] = value
     return config
 
 
