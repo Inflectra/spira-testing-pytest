@@ -19,7 +19,7 @@ def pytest_runtest_makereport(item, call, __multicall__):
             status_id = -1
             current_time = datetime.datetime.utcnow()
             # The function name
-            test_name = report.location[2]
+            test_name = report.location[2].lower()
             stack_trace = report.longreprtext
             message = ""
 
