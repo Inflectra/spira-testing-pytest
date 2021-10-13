@@ -3,17 +3,15 @@ import json
 import datetime
 import time
 import configparser
-import pytest
 
 '''
 The config is only retrieved once
 '''
 config = None
 
-@pytest.hookimpl(hookwrapper=True)
+
 def pytest_runtest_makereport(item, call, __multicall__):
-    outcome = yield
-    report = outcome.get_result()
+    report = __multicall__.execute()
     if report.when == "call":
         config = getConfig()
         # Only do stuff if config is specified

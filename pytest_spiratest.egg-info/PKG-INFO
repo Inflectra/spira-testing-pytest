@@ -1,19 +1,22 @@
 Metadata-Version: 2.1
 Name: pytest-spiratest
-Version: 1.3.0
+Version: 1.4.0
 Summary: Exports unit tests as test runs in SpiraTest/Team/Plan
 Home-page: http://www.inflectra.com/SpiraTest/Integrations/Unit-Test-Frameworks.aspx
 Author: Inflectra Corporation
 Author-email: support@inflectra.com
 License: UNKNOWN
-Description: # PyTest Extension for SpiraTest
-        
-        This version of the plugin is compatible with Python 3.x and SpiraTest/SpiraTeam/SpiraPlan 6.+
-        
-        The latest documentation for using this extension can be found at http://spiradoc.inflectra.com/Unit-Testing-Integration/Integrating-with-PyTest/
 Platform: UNKNOWN
 Classifier: Framework :: Pytest
 Classifier: Topic :: Software Development :: Testing
 Classifier: Programming Language :: Python :: 3
 Classifier: Operating System :: OS Independent
 Description-Content-Type: text/markdown
+License-File: LICENSE
+
+# PyTest Extension for SpiraTest
+
+This version of the plugin is compatible with Python 3.x and SpiraTest/SpiraTeam/SpiraPlan 6.+
+
+The latest documentation for using this extension can be found at http://spiradoc.inflectra.com/Unit-Testing-Integration/Integrating-with-PyTest/
+
