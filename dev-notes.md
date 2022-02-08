@@ -4,6 +4,8 @@
 - install python 3+
 - install pip
 - update pip as required
+- install pytest `pip install pytest`
+- install twine for distribution `pip install twine`
 
 ## Work and test code locally
 - change version number in setup.py
