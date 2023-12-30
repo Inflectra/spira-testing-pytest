@@ -155,8 +155,8 @@ class SpiraTestRun:
         body = {
             # Constant for plain text
             'TestRunFormatId': 1,
-            'StartDate': self.start_time.isoformat(),
-            'EndDate': self.end_time.isoformat(),
+            'StartDate': self.start_time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'EndDate': self.end_time.strftime('%Y-%m-%dT%H:%M:%SZ'),
             'RunnerName': RUNNER_NAME,
             'RunnerTestName': self.test_name,
             'RunnerMessage': self.message,
