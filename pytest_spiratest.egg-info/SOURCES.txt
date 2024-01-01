@@ -1,8 +1,12 @@
 LICENSE
+MANIFEST.in
 README.md
 pytest_spiratest_integration.py
+sample_test.py
+sample_test_class.py
 setup.cfg
 setup.py
+spira.cfg
 pytest_spiratest.egg-info/PKG-INFO
 pytest_spiratest.egg-info/SOURCES.txt
 pytest_spiratest.egg-info/dependency_links.txt
