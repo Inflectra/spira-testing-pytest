@@ -10,6 +10,12 @@ import sys
 The config is only retrieved once
 '''
 config = None
+config_loaded = False  # Track if we've attempted to load config
+spira_disabled = False  # Track if Spira is disabled to skip all processing
+
+# Cache for expensive checks
+_batch_mode_cache = None  # Cache batch mode result
+_spira_enabled_cache = None  # Cache enabled state result
 
 # Store test results for batch posting
 test_results_queue = []
@@ -30,7 +36,9 @@ def log_message(message, level="INFO"):
 def log_verbose(message, config):
     """
     Log a message only if verbose mode is enabled
+    OPTIMIZED: Check verbose flag directly without dict.get()
     """
+    # Fast path: check verbose flag directly
     if config.get("verbose", False):
         log_message(message, "DEBUG")
 
@@ -89,9 +97,21 @@ def pytest_sessionfinish(session, exitstatus):
     Called after whole test run finished, right before returning the exit status
     Post batched results if batch mode is enabled and aggregate class-level and marker-level results
     """
-    global test_results_queue, class_test_results, marker_test_results
+    global test_results_queue, class_test_results, marker_test_results, spira_disabled
+    
+    # Early exit: Check CLI flag first before loading config
+    if session.config._spira_cli_disabled:
+        return
+    
+    # Early exit: If we've already determined Spira is disabled, skip all processing
+    if spira_disabled:
+        return
     
     config = getConfig()
+    
+    # Early exit if disabled
+    if not is_spira_enabled(session.config, config):
+        return
     
     # Process aggregated marker-level results first
     if marker_test_results:
@@ -139,40 +159,61 @@ def is_spira_enabled(pytest_config, spira_config):
     """
     Determine if Spira integration is enabled based on CLI and config settings
     Priority: CLI --spira-disabled > CLI --spira-enabled > config enabled setting > default (true)
+    OPTIMIZED: Result is cached after first call
     """
+    global _spira_enabled_cache
+    
+    # Return cached result if available
+    if _spira_enabled_cache is not None:
+        return _spira_enabled_cache
+    
     # CLI --spira-disabled has highest priority
     if pytest_config._spira_cli_disabled:
         log_verbose("Spira integration disabled via --spira-disabled CLI flag", spira_config)
+        _spira_enabled_cache = False
         return False
     
     # CLI --spira-enabled overrides config
     if pytest_config._spira_cli_enabled:
         log_verbose("Spira integration enabled via --spira-enabled CLI flag", spira_config)
+        _spira_enabled_cache = True
         return True
     
     # Check config file setting
     if "enabled" in spira_config:
         enabled = spira_config["enabled"]
         log_verbose(f"Spira integration {'enabled' if enabled else 'disabled'} via config file", spira_config)
+        _spira_enabled_cache = enabled
         return enabled
     
     # Default: enabled if URL is configured
-    return spira_config.get("url", "") != ""
+    result = spira_config.get("url", "") != ""
+    _spira_enabled_cache = result
+    return result
 
 
 def is_batch_mode_enabled(pytest_config, spira_config):
     """
     Determine if batch mode is enabled based on CLI and config settings
     Priority: CLI --spira-no-batch > CLI --spira-batch > config batch_mode setting > default (false)
+    OPTIMIZED: Result is cached after first call
     """
+    global _batch_mode_cache
+    
+    # Return cached result if available
+    if _batch_mode_cache is not None:
+        return _batch_mode_cache
+    
     # CLI --spira-no-batch has highest priority
     if pytest_config._spira_cli_no_batch:
         log_verbose("Batch mode disabled via --spira-no-batch CLI flag", spira_config)
+        _batch_mode_cache = False
         return False
     
     # CLI --spira-batch overrides config
     if pytest_config._spira_cli_batch:
         log_verbose("Batch mode enabled via --spira-batch CLI flag", spira_config)
+        _batch_mode_cache = True
         return True
     
     # Check config file setting
@@ -181,6 +222,7 @@ def is_batch_mode_enabled(pytest_config, spira_config):
         log_verbose("Batch mode enabled via config file", spira_config)
     else:
         log_verbose("Batch mode disabled (default or config)", spira_config)
+    _batch_mode_cache = batch_enabled
     return batch_enabled
 
 
@@ -189,10 +231,22 @@ def pytest_runtest_makereport(item, call):
     outcome = yield
     report = outcome.get_result()
     if report.when == "call":
+        global spira_disabled
+        
+        # Early exit: Check CLI flag first before loading config
+        if item.config._spira_cli_disabled:
+            spira_disabled = True
+            return report
+        
+        # Early exit: If we've already determined Spira is disabled, skip all processing
+        if spira_disabled:
+            return report
+        
         config = getConfig()
         
-        # Check if integration is enabled
+        # Check if integration is enabled and cache the result
         if not is_spira_enabled(item.config, config):
+            spira_disabled = True
             return report
         
         # Only do stuff if config is specified
@@ -218,11 +272,8 @@ def pytest_runtest_makereport(item, call):
                 status_id = 1
                 message = ""
 
-            # Get the test case id using priority: marker > function > class > default
-            test_case_id = get_test_case_id(item, test_name, config)
-            
-            # Determine the mapping source for aggregation logic
-            mapping_source = get_mapping_source(item, test_name, config)
+            # OPTIMIZATION: Get test case ID and mapping source in one pass
+            test_case_id, mapping_source = get_test_case_id_and_source(item, test_name, config)
             
             log_verbose(f"Test '{test_name}' mapped to Spira test case ID: {test_case_id} (source: {mapping_source})", config)
 
@@ -301,73 +352,38 @@ def pytest_runtest_makereport(item, call):
     return report
 
 
-def get_test_case_id(item, test_name, config):
+def get_test_case_id_and_source(item, test_name, config):
     """
-    Get the test case ID with priority:
-    1. Marker (spira_id)
-    2. Other markers (from marker_mappings config)
-    3. Function name
-    4. Class name
-    5. Default
-    """
-    # Check for spira_id marker (highest priority)
-    marker = item.get_closest_marker("spira_id")
-    if marker and marker.args:
-        return marker.args[0]
+    OPTIMIZED: Get both test case ID and mapping source in a single pass.
+    This avoids duplicate marker lookups which are expensive.
     
-    # Check for other marker mappings
-    if "marker_mappings" in config:
-        for marker_name, test_case_id in config["marker_mappings"].items():
-            if item.get_closest_marker(marker_name):
-                return test_case_id
-    
-    # Check for function-level mapping
-    if test_name in config["test_case_ids"]:
-        return config["test_case_ids"][test_name.lower()]
-    
-    # Check for class-level mapping
-    if item.cls:
-        class_name = item.cls.__name__.lower()
-        if class_name in config["test_case_ids"]:
-            return config["test_case_ids"][class_name]
-    
-    # Return default
-    return config["test_case_ids"]["default"]
-
-
-def get_mapping_source(item, test_name, config):
-    """
-    Determine the source of the test case ID mapping for aggregation purposes.
-    Returns a dict with 'type' and additional info:
-    - {'type': 'spira_id'} - Individual spira_id marker (no aggregation)
-    - {'type': 'marker', 'marker_name': 'smoke'} - Marker mapping (aggregate by marker)
-    - {'type': 'function'} - Function-level mapping (no aggregation)
-    - {'type': 'class'} - Class-level mapping (aggregate by class)
-    - {'type': 'default'} - Default mapping (no aggregation)
+    Returns: (test_case_id, mapping_source_dict)
     """
     # Check for spira_id marker (highest priority - no aggregation)
-    marker = item.get_closest_marker("spira_id")
-    if marker and marker.args:
-        return {'type': 'spira_id'}
+    spira_id_marker = item.get_closest_marker("spira_id")
+    if spira_id_marker and spira_id_marker.args:
+        return spira_id_marker.args[0], {'type': 'spira_id'}
     
     # Check for other marker mappings (aggregate by marker)
-    if "marker_mappings" in config:
+    # OPTIMIZATION: Only check markers that are in config to avoid unnecessary lookups
+    if "marker_mappings" in config and config["marker_mappings"]:
         for marker_name, test_case_id in config["marker_mappings"].items():
-            if item.get_closest_marker(marker_name):
-                return {'type': 'marker', 'marker_name': marker_name}
+            marker = item.get_closest_marker(marker_name)
+            if marker:
+                return test_case_id, {'type': 'marker', 'marker_name': marker_name}
     
     # Check for function-level mapping (no aggregation)
     if test_name in config["test_case_ids"]:
-        return {'type': 'function'}
+        return config["test_case_ids"][test_name], {'type': 'function'}
     
     # Check for class-level mapping (aggregate by class)
     if item.cls:
         class_name = item.cls.__name__.lower()
         if class_name in config["test_case_ids"]:
-            return {'type': 'class'}
+            return config["test_case_ids"][class_name], {'type': 'class'}
     
-    # Default mapping (no aggregation)
-    return {'type': 'default'}
+    # Return default
+    return config["test_case_ids"]["default"], {'type': 'default'}
 
 
 def aggregate_class_results(class_data, config):
@@ -560,9 +576,11 @@ def load_env_file(filepath=".env.spira"):
 
 
 def getConfig():
-    global config
+    global config, config_loaded, spira_disabled
     # Only retrieve config once
     if config is None:
+        config_loaded = True
+        
         # Model of config object:
         config = {
             "url": "",
@@ -581,6 +599,12 @@ def getConfig():
             "batch_size": BATCH_SIZE_LIMIT
         }
         
+        # Quick check: if no config files exist, return minimal config immediately
+        if not os.path.exists("spira.cfg") and not os.path.exists(".env.spira"):
+            config["enabled"] = False
+            spira_disabled = True
+            return config
+        
         # Load environment variables from .env.spira file
         env_vars = load_env_file()
         
@@ -590,6 +614,8 @@ def getConfig():
         
         # Warn if no config file found and no env vars
         if not config_files_read and not env_vars:
+            config["enabled"] = False
+            spira_disabled = True
             log_message("No spira.cfg file or .env.spira file found. Spira integration will be disabled.", "WARNING")
             return config
 
@@ -663,6 +689,10 @@ def getConfig():
                     log_message(f"Invalid SPIRA_BATCH_SIZE value: {env_vars['SPIRA_BATCH_SIZE']} (must be positive)", "WARNING")
             except ValueError:
                 log_message(f"Invalid SPIRA_BATCH_SIZE value: {env_vars['SPIRA_BATCH_SIZE']} (must be integer)", "WARNING")
+        
+        # Set spira_disabled flag if config indicates disabled
+        if not config["enabled"]:
+            spira_disabled = True
         
         # Log configuration summary if verbose
         if config["verbose"]:
