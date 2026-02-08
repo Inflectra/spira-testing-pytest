@@ -26,6 +26,9 @@ class_test_results = {}
 # Store marker-level test results for aggregation
 marker_test_results = {}
 
+# Store module-level test results for aggregation
+module_test_results = {}
+
 def log_message(message, level="INFO"):
     """
     Log a message to stderr so it appears in pytest output
@@ -95,9 +98,9 @@ def pytest_configure(config):
 def pytest_sessionfinish(session, exitstatus):
     """
     Called after whole test run finished, right before returning the exit status
-    Post batched results if batch mode is enabled and aggregate class-level and marker-level results
+    Post batched results if batch mode is enabled and aggregate class-level, marker-level, and module-level results
     """
-    global test_results_queue, class_test_results, marker_test_results, spira_disabled
+    global test_results_queue, class_test_results, marker_test_results, module_test_results, spira_disabled
     
     # Early exit: Check CLI flag first before loading config
     if session.config._spira_cli_disabled:
@@ -124,6 +127,18 @@ def pytest_sessionfinish(session, exitstatus):
                 else:
                     aggregated_run.post(config["url"], config["username"], config["token"], config, session.config)
         marker_test_results = {}
+    
+    # Process aggregated module-level results
+    if module_test_results:
+        log_verbose(f"Processing {len(module_test_results)} module-level test results", config)
+        for module_key, module_data in module_test_results.items():
+            aggregated_run = aggregate_module_results(module_data, config)
+            if aggregated_run:
+                if is_batch_mode_enabled(session.config, config):
+                    test_results_queue.append(aggregated_run)
+                else:
+                    aggregated_run.post(config["url"], config["username"], config["token"], config, session.config)
+        module_test_results = {}
     
     # Process aggregated class-level results
     if class_test_results:
@@ -229,127 +244,160 @@ def is_batch_mode_enabled(pytest_config, spira_config):
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
     outcome = yield
+    
+    # OPTIMIZATION: Early exit before any processing
+    global spira_disabled
+    
+    # If we've already determined Spira is disabled, exit immediately
+    if spira_disabled:
+        return
+    
+    # Check CLI flag before even getting the report
+    if hasattr(item.config, '_spira_cli_disabled') and item.config._spira_cli_disabled:
+        spira_disabled = True
+        return
+    
     report = outcome.get_result()
-    if report.when == "call":
-        global spira_disabled
-        
-        # Early exit: Check CLI flag first before loading config
-        if item.config._spira_cli_disabled:
-            spira_disabled = True
-            return report
-        
-        # Early exit: If we've already determined Spira is disabled, skip all processing
-        if spira_disabled:
-            return report
-        
-        config = getConfig()
-        
-        # Check if integration is enabled and cache the result
-        if not is_spira_enabled(item.config, config):
-            spira_disabled = True
-            return report
-        
-        # Only do stuff if config is specified
-        if config["url"] != "":
-            status_id = -1
-            current_time = datetime.datetime.utcnow()
-            # The function name
-            test_name = report.location[2].lower()
-            # Handle None stack trace for passing tests
-            stack_trace = report.longreprtext if report.longreprtext else ""
+    
+    # Only process the actual test call, not setup/teardown
+    if report.when != "call":
+        return
+    
+    # Load config only once on first test
+    config = getConfig()
+    
+    # Check if integration is enabled and cache the result
+    if not is_spira_enabled(item.config, config):
+        spira_disabled = True
+        return
+    
+    # Only do stuff if config is specified
+    if config["url"] != "":
+        status_id = -1
+        current_time = datetime.datetime.utcnow()
+        # The function name
+        test_name = report.location[2].lower()
+        # Handle None stack trace for passing tests
+        stack_trace = report.longreprtext if report.longreprtext else ""
+        message = ""
+
+        if report.outcome == "passed":
+            # 2 is passed
+            status_id = 2
+            message = "Test Succeeded"
+        elif report.outcome == "skipped":
+            # 3 is not run
+            status_id = 3
+            message = "Test Skipped"
+        elif report.outcome == "failed":
+            #1 is failed
+            status_id = 1
             message = ""
 
-            if report.outcome == "passed":
-                # 2 is passed
-                status_id = 2
-                message = "Test Succeeded"
-            elif report.outcome == "skipped":
-                # 3 is not run
-                status_id = 3
-                message = "Test Skipped"
-            elif report.outcome == "failed":
-                #1 is failed
-                status_id = 1
-                message = ""
+        # OPTIMIZATION: Get test case ID and mapping source in one pass
+        test_case_id, mapping_source = get_test_case_id_and_source(item, test_name, config)
+        
+        # Skip logging if no mapping found and no default configured
+        if test_case_id is None:
+            log_verbose(f"Test '{test_name}' has no mapping and no default configured - skipping Spira logging", config)
+            return
+        
+        log_verbose(f"Test '{test_name}' mapped to Spira test case ID: {test_case_id} (source: {mapping_source})", config)
 
-            # OPTIMIZATION: Get test case ID and mapping source in one pass
-            test_case_id, mapping_source = get_test_case_id_and_source(item, test_name, config)
-            
-            log_verbose(f"Test '{test_name}' mapped to Spira test case ID: {test_case_id} (source: {mapping_source})", config)
-
-            # Create the test run
-            test_run = SpiraTestRun(
-                config["project_id"], 
-                test_case_id, 
-                test_name, 
-                stack_trace, 
-                status_id, 
-                current_time - datetime.timedelta(seconds=report.duration), 
-                current_time,
-                message=message, 
-                release_id=config["release_id"], 
-                test_set_id=config["test_set_id"]
-            )
-            
-            # Aggregate results based on mapping source
-            if mapping_source['type'] == 'marker':
-                # Marker-level mapping - aggregate all tests with this marker
-                global marker_test_results
-                marker_key = (mapping_source['marker_name'], test_case_id)
-                if marker_key not in marker_test_results:
-                    marker_test_results[marker_key] = {
-                        'marker_name': mapping_source['marker_name'],
-                        'test_case_id': test_case_id,
-                        'results': [],
-                        'project_id': config["project_id"],
-                        'release_id': config["release_id"],
-                        'test_set_id': config["test_set_id"]
-                    }
-                marker_test_results[marker_key]['results'].append({
-                    'test_name': test_name,
-                    'status_id': status_id,
-                    'stack_trace': stack_trace,
-                    'message': message,
-                    'start_time': current_time - datetime.timedelta(seconds=report.duration),
-                    'end_time': current_time,
-                    'duration': report.duration
-                })
-                log_verbose(f"Aggregating marker-level result for: @{mapping_source['marker_name']} - {test_name}", config)
-            elif mapping_source['type'] == 'class':
-                # Class-level mapping - aggregate all tests in this class
-                global class_test_results
-                class_key = (item.cls.__name__, test_case_id)
-                if class_key not in class_test_results:
-                    class_test_results[class_key] = {
-                        'class_name': item.cls.__name__,
-                        'test_case_id': test_case_id,
-                        'results': [],
-                        'project_id': config["project_id"],
-                        'release_id': config["release_id"],
-                        'test_set_id': config["test_set_id"]
-                    }
-                class_test_results[class_key]['results'].append({
-                    'test_name': test_name,
-                    'status_id': status_id,
-                    'stack_trace': stack_trace,
-                    'message': message,
-                    'start_time': current_time - datetime.timedelta(seconds=report.duration),
-                    'end_time': current_time,
-                    'duration': report.duration
-                })
-                log_verbose(f"Aggregating class-level result for: {item.cls.__name__}.{test_name}", config)
+        # Create the test run
+        test_run = SpiraTestRun(
+            config["project_id"], 
+            test_case_id, 
+            test_name, 
+            stack_trace, 
+            status_id, 
+            current_time - datetime.timedelta(seconds=report.duration), 
+            current_time,
+            message=message, 
+            release_id=config["release_id"], 
+            test_set_id=config["test_set_id"]
+        )
+        
+        # Aggregate results based on mapping source
+        if mapping_source['type'] == 'marker':
+            # Marker-level mapping - aggregate all tests with this marker
+            global marker_test_results
+            marker_key = (mapping_source['marker_name'], test_case_id)
+            if marker_key not in marker_test_results:
+                marker_test_results[marker_key] = {
+                    'marker_name': mapping_source['marker_name'],
+                    'test_case_id': test_case_id,
+                    'results': [],
+                    'project_id': config["project_id"],
+                    'release_id': config["release_id"],
+                    'test_set_id': config["test_set_id"]
+                }
+            marker_test_results[marker_key]['results'].append({
+                'test_name': test_name,
+                'status_id': status_id,
+                'stack_trace': stack_trace,
+                'message': message,
+                'start_time': current_time - datetime.timedelta(seconds=report.duration),
+                'end_time': current_time,
+                'duration': report.duration
+            })
+            log_verbose(f"Aggregating marker-level result for: @{mapping_source['marker_name']} - {test_name}", config)
+        elif mapping_source['type'] == 'module':
+            # Module-level mapping - aggregate all tests in this module
+            global module_test_results
+            module_key = (mapping_source['module_name'], test_case_id)
+            if module_key not in module_test_results:
+                module_test_results[module_key] = {
+                    'module_name': mapping_source['module_name'],
+                    'test_case_id': test_case_id,
+                    'results': [],
+                    'project_id': config["project_id"],
+                    'release_id': config["release_id"],
+                    'test_set_id': config["test_set_id"]
+                }
+            module_test_results[module_key]['results'].append({
+                'test_name': test_name,
+                'status_id': status_id,
+                'stack_trace': stack_trace,
+                'message': message,
+                'start_time': current_time - datetime.timedelta(seconds=report.duration),
+                'end_time': current_time,
+                'duration': report.duration
+            })
+            log_verbose(f"Aggregating module-level result for: {mapping_source['module_name']}.{test_name}", config)
+        elif mapping_source['type'] == 'class':
+            # Class-level mapping - aggregate all tests in this class
+            global class_test_results
+            class_key = (item.cls.__name__, test_case_id)
+            if class_key not in class_test_results:
+                class_test_results[class_key] = {
+                    'class_name': item.cls.__name__,
+                    'test_case_id': test_case_id,
+                    'results': [],
+                    'project_id': config["project_id"],
+                    'release_id': config["release_id"],
+                    'test_set_id': config["test_set_id"]
+                }
+            class_test_results[class_key]['results'].append({
+                'test_name': test_name,
+                'status_id': status_id,
+                'stack_trace': stack_trace,
+                'message': message,
+                'start_time': current_time - datetime.timedelta(seconds=report.duration),
+                'end_time': current_time,
+                'duration': report.duration
+            })
+            log_verbose(f"Aggregating class-level result for: {item.cls.__name__}.{test_name}", config)
+        else:
+            # Function-level, spira_id marker, or default - post individually
+            if is_batch_mode_enabled(item.config, config):
+                # Add to queue for batch posting
+                global test_results_queue
+                test_results_queue.append(test_run)
+                log_verbose(f"Queued test result for batch posting: {test_name}", config)
             else:
-                # Function-level, spira_id marker, or default - post individually
-                if is_batch_mode_enabled(item.config, config):
-                    # Add to queue for batch posting
-                    global test_results_queue
-                    test_results_queue.append(test_run)
-                    log_verbose(f"Queued test result for batch posting: {test_name}", config)
-                else:
-                    # Post immediately
-                    test_run.post(config["url"], config["username"], config["token"], config, item.config)
-
-    return report
+                # Post immediately
+                test_run.post(config["url"], config["username"], config["token"], config, item.config)
 
 
 def get_test_case_id_and_source(item, test_name, config):
@@ -382,8 +430,19 @@ def get_test_case_id_and_source(item, test_name, config):
         if class_name in config["test_case_ids"]:
             return config["test_case_ids"][class_name], {'type': 'class'}
     
-    # Return default
-    return config["test_case_ids"]["default"], {'type': 'default'}
+    # Check for module-level mapping (aggregate by module)
+    if item.module and "module_mappings" in config and config["module_mappings"]:
+        module_name = item.module.__name__.lower()
+        log_verbose(f"Checking module mapping for module: '{module_name}' against configured modules: {list(config['module_mappings'].keys())}", config)
+        if module_name in config["module_mappings"]:
+            return config["module_mappings"][module_name], {'type': 'module', 'module_name': module_name}
+    
+    # Return default (if configured)
+    if "default" in config["test_case_ids"]:
+        return config["test_case_ids"]["default"], {'type': 'default'}
+    
+    # No mapping found and no default - return None to skip logging
+    return None, {'type': 'unmapped'}
 
 
 def aggregate_class_results(class_data, config):
@@ -557,6 +616,86 @@ def aggregate_marker_results(marker_data, config):
     return aggregated_run
 
 
+def aggregate_module_results(module_data, config):
+    """
+    Aggregate multiple test results from a module into a single test run
+    Returns a SpiraTestRun with aggregated results
+    """
+    results = module_data['results']
+    if not results:
+        return None
+    
+    # Determine overall status: fail if any failed, pass if all passed
+    overall_status = 2  # Start with passed
+    has_failure = False
+    has_skip = False
+    
+    for result in results:
+        if result['status_id'] == 1:  # Failed
+            has_failure = True
+            overall_status = 1
+            break
+        elif result['status_id'] == 3:  # Skipped
+            has_skip = True
+    
+    # If no failures but has skips, mark as skipped
+    if not has_failure and has_skip:
+        overall_status = 3
+    
+    # Aggregate messages and stack traces
+    combined_message = f"Module: {module_data['module_name']}\n"
+    combined_stack_trace = ""
+    
+    passed_count = 0
+    failed_count = 0
+    skipped_count = 0
+    
+    for result in results:
+        if result['status_id'] == 2:
+            passed_count += 1
+        elif result['status_id'] == 1:
+            failed_count += 1
+        elif result['status_id'] == 3:
+            skipped_count += 1
+    
+    combined_message += f"Total: {len(results)} tests - "
+    combined_message += f"Passed: {passed_count}, Failed: {failed_count}, Skipped: {skipped_count}\n\n"
+    
+    # Add details for each test
+    for result in results:
+        status_text = "PASSED" if result['status_id'] == 2 else "FAILED" if result['status_id'] == 1 else "SKIPPED"
+        combined_message += f"[{status_text}] {result['test_name']}\n"
+        
+        if result['stack_trace']:
+            combined_stack_trace += f"\n{'='*60}\n"
+            combined_stack_trace += f"Test: {result['test_name']}\n"
+            combined_stack_trace += f"{'='*60}\n"
+            combined_stack_trace += result['stack_trace']
+            combined_stack_trace += "\n"
+    
+    # Use the earliest start time and latest end time
+    start_time = min(r['start_time'] for r in results)
+    end_time = max(r['end_time'] for r in results)
+    
+    # Create aggregated test run
+    aggregated_run = SpiraTestRun(
+        module_data['project_id'],
+        module_data['test_case_id'],
+        module_data['module_name'],
+        combined_stack_trace.strip(),
+        overall_status,
+        start_time,
+        end_time,
+        message=combined_message.strip(),
+        release_id=module_data['release_id'],
+        test_set_id=module_data['test_set_id']
+    )
+    
+    log_verbose(f"Aggregated {len(results)} tests for module {module_data['module_name']} - Status: {overall_status}", config)
+    
+    return aggregated_run
+
+
 def load_env_file(filepath=".env.spira"):
     """
     Load environment variables from a .env.spira file
@@ -589,10 +728,9 @@ def getConfig():
             "project_id": -1,
             "release_id": -1,
             "test_set_id": -1,
-            "test_case_ids": {
-                "default": -1
-            },
+            "test_case_ids": {},
             "marker_mappings": {},
+            "module_mappings": {},
             "verbose": False,
             "enabled": True,
             "batch_mode": False,
@@ -605,8 +743,29 @@ def getConfig():
             spira_disabled = True
             return config
         
+        # OPTIMIZATION: Quick check if enabled=false in config before parsing everything
+        # This avoids expensive parsing when disabled
+        if os.path.exists("spira.cfg"):
+            try:
+                with open("spira.cfg", 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.lower() == "enabled = false" or line.lower() == "enabled=false":
+                            config["enabled"] = False
+                            spira_disabled = True
+                            return config
+            except:
+                pass  # If quick check fails, fall through to full parsing
+        
         # Load environment variables from .env.spira file
         env_vars = load_env_file()
+        
+        # Check env var for enabled state before full parsing
+        if "SPIRA_ENABLED" in env_vars:
+            if env_vars["SPIRA_ENABLED"].lower() not in ("true", "yes", "1", "on"):
+                config["enabled"] = False
+                spira_disabled = True
+                return config
         
         # Parse the config file
         parser = configparser.ConfigParser()
@@ -633,6 +792,9 @@ def getConfig():
             elif section == "markers":
                 for (key, value) in parser.items(section):
                     config["marker_mappings"][key.lower()] = value
+            elif section == "modules":
+                for (key, value) in parser.items(section):
+                    config["module_mappings"][key.lower()] = value
             elif section == "settings":
                 for (key, value) in parser.items(section):
                     if key.lower() == "verbose":

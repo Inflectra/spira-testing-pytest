@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: pytest-spiratest
-Version: 2.0.2
+Version: 2.1.0
 Summary: Exports unit tests as test runs in Spira (SpiraTest/Team/Plan)
 Home-page: http://www.inflectra.com/SpiraTest/Integrations/Unit-Test-Frameworks.aspx
 Author: Inflectra Corporation

@@ -13,7 +13,7 @@ with io.open("README.md") as readme_file:
 # Register plugin with pytest
 setuptools.setup(
     name ='pytest-spiratest',
-    version = '2.0.2',
+    version = '2.1.0',
     author = 'Inflectra Corporation',
     author_email ='support@inflectra.com',
     url = 'http://www.inflectra.com/SpiraTest/Integrations/Unit-Test-Frameworks.aspx',

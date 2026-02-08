@@ -6,6 +6,7 @@ sample_test.py
 sample_test_class.py
 sample_test_enhanced.py
 sample_test_markers.py
+sample_test_module_mapping.py
 setup.cfg
 setup.py
 spira.cfg
@@ -21,5 +22,6 @@ tests/test_batch_mode.py
 tests/test_cli_options.py
 tests/test_config_loading.py
 tests/test_marker_lookups.py
+tests/test_module_mapping.py
 tests/test_performance.py
 tests/test_test_run_posting.py

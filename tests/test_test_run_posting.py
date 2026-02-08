@@ -5,7 +5,7 @@ import pytest
 import pytest_spiratest_integration as plugin
 from unittest.mock import Mock, patch
 import datetime
-
+from urllib.parse import urlparse
 
 class TestTestRunPosting:
     """Test posting test runs to Spira"""
@@ -101,8 +101,10 @@ class TestTestRunPosting:
         call_args = mock_post.call_args
         
         # Check URL
-        assert "test.spira.com" in call_args[0][0]
-        assert "projects/1/test-runs/record" in call_args[0][0]
+        url = call_args[0][0]
+        parsed_url = urlparse(url)
+        assert parsed_url.hostname == "test.spira.com"
+        assert parsed_url.path.endswith("/projects/1/test-runs/record")
         
         # Check params
         assert call_args[1]['params']['username'] == 'test_user'
