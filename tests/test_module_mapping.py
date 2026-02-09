@@ -424,6 +424,132 @@ test_example_module = 300
         assert '[FAILED] test_fail' in aggregated_run.message
         assert 'AssertionError: test failed' in aggregated_run.stack_trace
     
+    def test_module_aggregation_with_mixed_pass_and_skip(self, temp_config_dir, reset_plugin_state):
+        """Test that module aggregation marks as PASSED when some tests pass and some skip"""
+        config_content = """[credentials]
+url = http://test.spira.com
+username = test_user
+token = test_token
+project_id = 1
+
+[test_cases]
+default = 100
+
+[modules]
+test_example_module = 300
+"""
+        config_file = temp_config_dir / "spira.cfg"
+        config_file.write_text(config_content)
+        
+        config = plugin.getConfig()
+        
+        # Create module aggregation data with passes and skips (no failures)
+        module_data = {
+            'module_name': 'test_example_module',
+            'test_case_id': '300',
+            'results': [
+                {
+                    'test_name': 'test_pass_1',
+                    'status_id': 2,
+                    'stack_trace': '',
+                    'message': 'Test Succeeded',
+                    'start_time': plugin.datetime.datetime(2024, 1, 1, 10, 0, 0),
+                    'end_time': plugin.datetime.datetime(2024, 1, 1, 10, 0, 1),
+                    'duration': 1.0
+                },
+                {
+                    'test_name': 'test_skip',
+                    'status_id': 3,
+                    'stack_trace': '',
+                    'message': 'Test Skipped',
+                    'start_time': plugin.datetime.datetime(2024, 1, 1, 10, 0, 1),
+                    'end_time': plugin.datetime.datetime(2024, 1, 1, 10, 0, 1),
+                    'duration': 0.0
+                },
+                {
+                    'test_name': 'test_pass_2',
+                    'status_id': 2,
+                    'stack_trace': '',
+                    'message': 'Test Succeeded',
+                    'start_time': plugin.datetime.datetime(2024, 1, 1, 10, 0, 1),
+                    'end_time': plugin.datetime.datetime(2024, 1, 1, 10, 0, 2),
+                    'duration': 1.0
+                }
+            ],
+            'project_id': 1,
+            'release_id': -1,
+            'test_set_id': -1
+        }
+        
+        # Aggregate the results
+        aggregated_run = plugin.aggregate_module_results(module_data, config)
+        
+        assert aggregated_run is not None
+        assert aggregated_run.status_id == 2  # Passed (because some tests passed)
+        assert 'Passed: 2' in aggregated_run.message
+        assert 'Failed: 0' in aggregated_run.message
+        assert 'Skipped: 1' in aggregated_run.message
+        assert '[PASSED] test_pass_1' in aggregated_run.message
+        assert '[SKIPPED] test_skip' in aggregated_run.message
+        assert '[PASSED] test_pass_2' in aggregated_run.message
+    
+    def test_module_aggregation_all_skipped(self, temp_config_dir, reset_plugin_state):
+        """Test that module aggregation marks as SKIPPED only when ALL tests are skipped"""
+        config_content = """[credentials]
+url = http://test.spira.com
+username = test_user
+token = test_token
+project_id = 1
+
+[test_cases]
+default = 100
+
+[modules]
+test_example_module = 300
+"""
+        config_file = temp_config_dir / "spira.cfg"
+        config_file.write_text(config_content)
+        
+        config = plugin.getConfig()
+        
+        # Create module aggregation data with only skips
+        module_data = {
+            'module_name': 'test_example_module',
+            'test_case_id': '300',
+            'results': [
+                {
+                    'test_name': 'test_skip_1',
+                    'status_id': 3,
+                    'stack_trace': '',
+                    'message': 'Test Skipped',
+                    'start_time': plugin.datetime.datetime(2024, 1, 1, 10, 0, 0),
+                    'end_time': plugin.datetime.datetime(2024, 1, 1, 10, 0, 0),
+                    'duration': 0.0
+                },
+                {
+                    'test_name': 'test_skip_2',
+                    'status_id': 3,
+                    'stack_trace': '',
+                    'message': 'Test Skipped',
+                    'start_time': plugin.datetime.datetime(2024, 1, 1, 10, 0, 0),
+                    'end_time': plugin.datetime.datetime(2024, 1, 1, 10, 0, 0),
+                    'duration': 0.0
+                }
+            ],
+            'project_id': 1,
+            'release_id': -1,
+            'test_set_id': -1
+        }
+        
+        # Aggregate the results
+        aggregated_run = plugin.aggregate_module_results(module_data, config)
+        
+        assert aggregated_run is not None
+        assert aggregated_run.status_id == 3  # Skipped (because ALL tests skipped)
+        assert 'Passed: 0' in aggregated_run.message
+        assert 'Failed: 0' in aggregated_run.message
+        assert 'Skipped: 2' in aggregated_run.message
+    
     def test_no_default_returns_none(self, temp_config_dir, reset_plugin_state):
         """Test that unmapped test returns None when no default is configured"""
         config_content = """[credentials]

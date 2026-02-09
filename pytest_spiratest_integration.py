@@ -244,6 +244,7 @@ def is_batch_mode_enabled(pytest_config, spira_config):
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
     outcome = yield
+    report = outcome.get_result()
     
     # OPTIMIZATION: Early exit before any processing
     global spira_disabled
@@ -257,10 +258,17 @@ def pytest_runtest_makereport(item, call):
         spira_disabled = True
         return
     
-    report = outcome.get_result()
-    
-    # Only process the actual test call, not setup/teardown
-    if report.when != "call":
+    # Process test call phase, OR skipped tests in setup phase (for module-level skipif)
+    # Module-level skipif causes tests to be skipped during setup, not call
+    if report.when == "call":
+        # Normal test execution
+        pass
+    elif report.when == "setup" and report.outcome == "skipped":
+        # Test was skipped during setup (e.g., due to module-level pytestmark skipif)
+        # We'll process this as a skipped test
+        pass
+    else:
+        # Skip setup/teardown for non-skipped tests
         return
     
     # Load config only once on first test
@@ -280,6 +288,9 @@ def pytest_runtest_makereport(item, call):
         # Handle None stack trace for passing tests
         stack_trace = report.longreprtext if report.longreprtext else ""
         message = ""
+        
+        # Determine test duration - for skipped tests in setup, duration might be 0
+        duration = getattr(report, 'duration', 0)
 
         if report.outcome == "passed":
             # 2 is passed
@@ -288,7 +299,15 @@ def pytest_runtest_makereport(item, call):
         elif report.outcome == "skipped":
             # 3 is not run
             status_id = 3
-            message = "Test Skipped"
+            # Extract skip reason if available
+            if hasattr(report, 'longrepr') and report.longrepr:
+                # For skipped tests, longrepr is usually a tuple (file, line, reason)
+                if isinstance(report.longrepr, tuple) and len(report.longrepr) >= 3:
+                    message = f"Test Skipped: {report.longrepr[2]}"
+                else:
+                    message = f"Test Skipped: {str(report.longrepr)}"
+            else:
+                message = "Test Skipped"
         elif report.outcome == "failed":
             #1 is failed
             status_id = 1
@@ -311,7 +330,7 @@ def pytest_runtest_makereport(item, call):
             test_name, 
             stack_trace, 
             status_id, 
-            current_time - datetime.timedelta(seconds=report.duration), 
+            current_time - datetime.timedelta(seconds=duration), 
             current_time,
             message=message, 
             release_id=config["release_id"], 
@@ -337,9 +356,9 @@ def pytest_runtest_makereport(item, call):
                 'status_id': status_id,
                 'stack_trace': stack_trace,
                 'message': message,
-                'start_time': current_time - datetime.timedelta(seconds=report.duration),
+                'start_time': current_time - datetime.timedelta(seconds=duration),
                 'end_time': current_time,
-                'duration': report.duration
+                'duration': duration
             })
             log_verbose(f"Aggregating marker-level result for: @{mapping_source['marker_name']} - {test_name}", config)
         elif mapping_source['type'] == 'module':
@@ -360,9 +379,9 @@ def pytest_runtest_makereport(item, call):
                 'status_id': status_id,
                 'stack_trace': stack_trace,
                 'message': message,
-                'start_time': current_time - datetime.timedelta(seconds=report.duration),
+                'start_time': current_time - datetime.timedelta(seconds=duration),
                 'end_time': current_time,
-                'duration': report.duration
+                'duration': duration
             })
             log_verbose(f"Aggregating module-level result for: {mapping_source['module_name']}.{test_name}", config)
         elif mapping_source['type'] == 'class':
@@ -383,9 +402,9 @@ def pytest_runtest_makereport(item, call):
                 'status_id': status_id,
                 'stack_trace': stack_trace,
                 'message': message,
-                'start_time': current_time - datetime.timedelta(seconds=report.duration),
+                'start_time': current_time - datetime.timedelta(seconds=duration),
                 'end_time': current_time,
-                'duration': report.duration
+                'duration': duration
             })
             log_verbose(f"Aggregating class-level result for: {item.cls.__name__}.{test_name}", config)
         else:
@@ -454,9 +473,13 @@ def aggregate_class_results(class_data, config):
     if not results:
         return None
     
-    # Determine overall status: fail if any failed, pass if all passed
+    # Determine overall status:
+    # - Failed (1) if any test failed
+    # - Passed (2) if any test passed (even if some skipped)
+    # - Skipped (3) only if ALL tests were skipped
     overall_status = 2  # Start with passed
     has_failure = False
+    has_pass = False
     has_skip = False
     
     for result in results:
@@ -464,11 +487,13 @@ def aggregate_class_results(class_data, config):
             has_failure = True
             overall_status = 1
             break
+        elif result['status_id'] == 2:  # Passed
+            has_pass = True
         elif result['status_id'] == 3:  # Skipped
             has_skip = True
     
-    # If no failures but has skips, mark as skipped
-    if not has_failure and has_skip:
+    # If no failures and no passes, but has skips, mark as skipped
+    if not has_failure and not has_pass and has_skip:
         overall_status = 3
     
     # Aggregate messages and stack traces
@@ -534,9 +559,13 @@ def aggregate_marker_results(marker_data, config):
     if not results:
         return None
     
-    # Determine overall status: fail if any failed, pass if all passed
+    # Determine overall status:
+    # - Failed (1) if any test failed
+    # - Passed (2) if any test passed (even if some skipped)
+    # - Skipped (3) only if ALL tests were skipped
     overall_status = 2  # Start with passed
     has_failure = False
+    has_pass = False
     has_skip = False
     
     for result in results:
@@ -544,11 +573,13 @@ def aggregate_marker_results(marker_data, config):
             has_failure = True
             overall_status = 1
             break
+        elif result['status_id'] == 2:  # Passed
+            has_pass = True
         elif result['status_id'] == 3:  # Skipped
             has_skip = True
     
-    # If no failures but has skips, mark as skipped
-    if not has_failure and has_skip:
+    # If no failures and no passes, but has skips, mark as skipped
+    if not has_failure and not has_pass and has_skip:
         overall_status = 3
     
     # Aggregate messages and stack traces
@@ -625,9 +656,13 @@ def aggregate_module_results(module_data, config):
     if not results:
         return None
     
-    # Determine overall status: fail if any failed, pass if all passed
+    # Determine overall status:
+    # - Failed (1) if any test failed
+    # - Passed (2) if any test passed (even if some skipped)
+    # - Skipped (3) only if ALL tests were skipped
     overall_status = 2  # Start with passed
     has_failure = False
+    has_pass = False
     has_skip = False
     
     for result in results:
@@ -635,11 +670,13 @@ def aggregate_module_results(module_data, config):
             has_failure = True
             overall_status = 1
             break
+        elif result['status_id'] == 2:  # Passed
+            has_pass = True
         elif result['status_id'] == 3:  # Skipped
             has_skip = True
     
-    # If no failures but has skips, mark as skipped
-    if not has_failure and has_skip:
+    # If no failures and no passes, but has skips, mark as skipped
+    if not has_failure and not has_pass and has_skip:
         overall_status = 3
     
     # Aggregate messages and stack traces
