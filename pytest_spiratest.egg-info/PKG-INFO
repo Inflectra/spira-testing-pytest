@@ -1,6 +1,6 @@
-Metadata-Version: 2.1
+Metadata-Version: 2.4
 Name: pytest-spiratest
-Version: 1.4.3
+Version: 2.1.0
 Summary: Exports unit tests as test runs in Spira (SpiraTest/Team/Plan)
 Home-page: http://www.inflectra.com/SpiraTest/Integrations/Unit-Test-Frameworks.aspx
 Author: Inflectra Corporation
@@ -11,9 +11,44 @@ Classifier: Programming Language :: Python :: 3
 Classifier: Operating System :: OS Independent
 Description-Content-Type: text/markdown
 License-File: LICENSE
+Requires-Dist: pytest>=3.0.0
+Requires-Dist: requests>=2.20.0
+Dynamic: author
+Dynamic: author-email
+Dynamic: classifier
+Dynamic: description
+Dynamic: description-content-type
+Dynamic: home-page
+Dynamic: license-file
+Dynamic: requires-dist
+Dynamic: summary
 
 # PyTest Extension for SpiraTest
 
 This version of the plugin is compatible with Python 3.x and SpiraTest/SpiraTeam/SpiraPlan 6.+
 
 The latest documentation for using this extension can be found at http://spiradoc.inflectra.com/Unit-Testing-Integration/Integrating-with-PyTest/
+
+## Performance Optimization
+
+The plugin is optimized to have **zero overhead** when disabled. If you're not using Spira integration, you can disable it in several ways:
+
+### Option 1: CLI Flag (Fastest - Zero Overhead)
+```bash
+pytest --spira-disabled
+```
+
+### Option 2: Configuration File
+Set `enabled = false` in your `spira.cfg`:
+```ini
+[settings]
+enabled = false
+```
+
+### Option 3: Remove Config Files
+If you're not using Spira at all, simply don't include `spira.cfg` or `.env.spira` files in your project.
+
+### Performance Notes
+- When disabled, the plugin performs minimal checks and exits immediately
+- No configuration parsing or file I/O occurs after the first test when disabled
+- Tests run at full speed with no measurable overhead from the plugin

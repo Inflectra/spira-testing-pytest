@@ -1,1 +1,2 @@
 pytest_spiratest_integration
+tests

@@ -4,6 +4,9 @@ README.md
 pytest_spiratest_integration.py
 sample_test.py
 sample_test_class.py
+sample_test_enhanced.py
+sample_test_markers.py
+sample_test_module_mapping.py
 setup.cfg
 setup.py
 spira.cfg
@@ -11,4 +14,14 @@ pytest_spiratest.egg-info/PKG-INFO
 pytest_spiratest.egg-info/SOURCES.txt
 pytest_spiratest.egg-info/dependency_links.txt
 pytest_spiratest.egg-info/entry_points.txt
+pytest_spiratest.egg-info/requires.txt
 pytest_spiratest.egg-info/top_level.txt
+tests/__init__.py
+tests/conftest.py
+tests/test_batch_mode.py
+tests/test_cli_options.py
+tests/test_config_loading.py
+tests/test_marker_lookups.py
+tests/test_module_mapping.py
+tests/test_performance.py
+tests/test_test_run_posting.py
